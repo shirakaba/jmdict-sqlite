@@ -12,12 +12,13 @@
     "@scriptin/jmdict-simplified-loader": "^3.5.0",
     "@scriptin/jmdict-simplified-types": "^3.5.0",
     "commander": "^11.0.0",
+    "sqlite3": "^5.1.6",
     "tmp": "^0.2.1"
   },
   "devDependencies": {
+    "@tsconfig/node18": "^18.2.0",
     "@types/node": "18",
     "@types/tmp": "^0.2.3",
-    "@tsconfig/node18": "^18.2.0",
     "eslint": "^8.43.0",
     "eslint-config-prettier": "^8.8.0",
     "husky": "^8.0.3",

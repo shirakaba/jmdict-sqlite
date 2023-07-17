@@ -1,3 +1,4 @@
+const { loadDictionary } = require('@scriptin/jmdict-simplified-loader');
 const path = require('path');
 const { program } = require('commander');
 const https = require('https'); // or 'https' for https:// URLs
@@ -5,6 +6,76 @@ const fs = require('fs');
 const fsPromises = require('fs').promises;
 const tmp = require('tmp');
 const child_process = require('child_process');
+const sqlite3 = require('sqlite3').verbose();
+
+async function main() {
+  program
+    .description(
+      'Download jmdict-simplified and use it to populate an SQLite database.'
+    )
+    .requiredOption(
+      '-i --input <type>',
+      'The input JSON file for jmdict-simplified.',
+      './downloads/jmdict-eng-3.5.0.json'
+    )
+    .option(
+      '-d --download-url <type>',
+      'The download URL for jmdict-simplified.',
+      'https://github.com/scriptin/jmdict-simplified/releases/download/3.5.0%2B20230710121913/jmdict-eng-3.5.0+20230710121913.json.zip'
+    )
+    .requiredOption(
+      '-o --output <type>',
+      'The output SQLite database filepath.',
+      './output/jmdict.sqlite3'
+    );
+
+  program.parse();
+
+  let { input, downloadUrl, output } = program.opts();
+
+  input = path.resolve(process.cwd(), input);
+  output = path.resolve(process.cwd(), output);
+  console.log(input);
+
+  if (!fs.existsSync(input)) {
+    if (!downloadUrl) {
+      console.log(
+        "--input needed downloading, but --download-url wasn't specified."
+      );
+      process.exit(1);
+    }
+    try {
+      const downloadsDir = path.dirname(input);
+      await fsPromises.mkdir(downloadsDir, { recursive: true });
+
+      const tmpName = path.basename(tmp.tmpNameSync());
+      const tmpFilepath = path.resolve(process.cwd(), downloadsDir, tmpName);
+
+      await download(downloadUrl, tmpFilepath);
+
+      // We don't know the contents of the zip, but trust blindly that it'll
+      // emit a 'jmdict-eng-3.5.0.json' file.
+      child_process.execSync(`unzip ${tmpFilepath} -d ${downloadsDir}`);
+
+      await fsPromises.rm(tmpFilepath);
+    } catch (error) {
+      console.log('Failed to download jmdict-simplified.', error);
+    }
+
+    process.exit(1);
+  }
+
+  try {
+    const outputDir = path.dirname(output);
+    await fsPromises.mkdir(outputDir, { recursive: true });
+    await populateDb(input, output);
+  } catch (error) {
+    console.log('Failed to generate DB.', error);
+    process.exit(1);
+  }
+
+  process.exit(0);
+}
 
 /**
  * @param {string} input The URL to download from
@@ -54,62 +125,52 @@ function download(input, output) {
   });
 }
 
-async function main() {
-  program
-    .description(
-      'Download jmdict-simplified and use it to populate an SQLite database.'
-    )
-    .requiredOption(
-      '-i --input <type>',
-      'The input JSON file for jmdict-simplified.',
-      './downloads/jmdict-eng-3.5.0.json'
-    )
-    .option(
-      '-d --download-url <type>',
-      'The download URL for jmdict-simplified.',
-      'https://github.com/scriptin/jmdict-simplified/releases/download/3.5.0%2B20230710121913/jmdict-eng-3.5.0+20230710121913.json.zip'
-    )
-    .requiredOption(
-      '-o --output <type>',
-      'The output SQLite database filepath.',
-      './output/jmdict.sqlite3'
-    );
+/**
+ *
+ * @param {string} input the jmdict-simplified JSON file.
+ * @param {string} dbPath the filepaht to the database.
+ * @returns {Promise<void>}
+ */
+async function populateDb(input, dbPath) {
+  const db = await new Promise((resolve, reject) => {
+    /** @type import('sqlite3').Database */
+    const db = new sqlite3.Database(dbPath, (err) => {
+      if (err) {
+        return reject(err);
+      }
 
-  program.parse();
+      return resolve(db);
+    });
+  });
 
-  let { input, downloadUrl, output } = program.opts();
+  console.log(db);
 
-  input = path.resolve(process.cwd(), input);
-  output = path.resolve(process.cwd(), output);
-  console.log(input);
+  let i = 0;
+  return new Promise((resolve) => {
+    const loader = loadDictionary('jmdict', input)
+      .onMetadata(() => {})
+      .onEntry((entry, metadata) => {
+        i++;
+        console.log('entry', entry);
+        // console.log('metadata entry', JSON.stringify(metadata));
 
-  if (!fs.existsSync(input)) {
-    if (!downloadUrl) {
-      console.log(
-        "--input needed downloading, but --download-url wasn't specified."
-      );
-      process.exit(1);
-    }
-    try {
-      const downloadsDir = path.dirname(input);
-      await fsPromises.mkdir(downloadsDir, { recursive: true });
+        if (i > 1) {
+          process.exit(1);
+        }
 
-      const tmpName = path.basename(tmp.tmpNameSync());
-      const tmpFilepath = path.resolve(process.cwd(), downloadsDir, tmpName);
+        // Load an entry into database
+      })
+      .onEnd(() => {
+        console.log('Finished!');
+        resolve();
+      });
 
-      await download(downloadUrl, tmpFilepath);
-
-      child_process.execSync(`unzip ${tmpFilepath} -d ${downloadsDir}`);
-
-      await fsPromises.rm(tmpFilepath);
-    } catch (error) {
-      console.log('Failed to download jmdict-simplified.', error);
-    }
-
-    process.exit(1);
-  }
-
-  console.log(`TODO: output SQLite database to: ${output}`);
+    // To handle parsing errors:
+    //@ts-ignore
+    loader.parser.on('error', (error) => {
+      console.error(error);
+    });
+  });
 }
 
 main().catch(console.error);
