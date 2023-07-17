@@ -1,0 +1,23 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Program",
+      "skipFiles": ["<node_internals>/**"],
+      "args": [
+        "-i",
+        "./downloads/jmdict-eng-3.5.0+20230710121913.json",
+        "-o",
+        "./output/jmdict.sqlite3",
+        "-d",
+        "https://github.com/scriptin/jmdict-simplified/releases/download/3.5.0%2B20230710121913/jmdict-eng-3.5.0+20230710121913.json.zip"
+      ],
+      "program": "${workspaceFolder}/src/index.js"
+    }
+  ]
+}
