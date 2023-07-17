@@ -145,7 +145,16 @@ async function populateDb(input, dbPath) {
   });
 
   db.run(
-    'CREATE TABLE IF NOT EXISTS words (id INTEGER PRIMARY KEY, kanji TEXT, kana TEXT, sense TEXT);',
+    'CREATE TABLE IF NOT EXISTS word_senses (id INTEGER PRIMARY KEY, sense TEXT);',
+    function onCompletion(error) {
+      if (error) {
+        console.log('SQLite error', error);
+      }
+    }
+  );
+
+  db.run(
+    'CREATE TABLE IF NOT EXISTS word_forms (form TEXT, kana INTEGER, tags TEXT, common INTEGER, headword INTEGER, PRIMARY KEY (form, headword));',
     function onCompletion(error) {
       if (error) {
         console.log('SQLite error', error);
@@ -164,12 +173,46 @@ async function populateDb(input, dbPath) {
           // console.log('entry', entry);
           // console.log('metadata entry', JSON.stringify(metadata));
 
+          for (const k of entry.kanji) {
+            db.run(
+              'INSERT OR REPLACE INTO word_forms ("form", "kana", "tags", "common", "headword") VALUES ($form, $kana, $tags, $common, $headword)',
+              {
+                $form: k.text,
+                $kana: 0,
+                $tags: k.tags.length ? JSON.stringify(k.tags) : undefined,
+                $common: k.common ? 1 : 0,
+                $headword: entry.id,
+              },
+              function onCompletion(error) {
+                if (error) {
+                  console.log('SQLite error', error);
+                }
+              }
+            );
+          }
+
+          for (const k of entry.kana) {
+            db.run(
+              'INSERT OR REPLACE INTO word_forms ("form", "kana", "tags", "common", "headword") VALUES ($form, $kana, $tags, $common, $headword)',
+              {
+                $form: k.text,
+                $kana: 1,
+                $tags: k.tags.length ? JSON.stringify(k.tags) : undefined,
+                $common: k.common ? 1 : 0,
+                $headword: entry.id,
+              },
+              function onCompletion(error) {
+                if (error) {
+                  console.log('SQLite error', error);
+                }
+              }
+            );
+          }
+
           db.run(
-            'INSERT OR REPLACE INTO words ("id", "kanji", "kana", "sense") VALUES ($id, $kanji, $kana, $sense)',
+            'INSERT OR REPLACE INTO word_senses ("id", "sense") VALUES ($id, $sense)',
             {
               $id: entry.id,
-              $kana: stringifyKana(entry.kana),
-              $kanji: stringifyKanji(entry.kanji),
               $sense: stringifySense(entry.sense),
             },
             function onCompletion(error) {
@@ -179,9 +222,9 @@ async function populateDb(input, dbPath) {
             }
           );
 
-          if (i > 1000) {
-            process.exit(1);
-          }
+          // if (i > 1000) {
+          //   process.exit(1);
+          // }
         })
         .onEnd(() => {
           console.log('Finished!');
@@ -200,48 +243,22 @@ async function populateDb(input, dbPath) {
 }
 
 /**
- * @param {import('@scriptin/jmdict-simplified-types').JMdictKana[]} kana
- */
-function stringifyKana(kana) {
-  return JSON.stringify(
-    kana.map((k) => {
-      return {
-        c: k.common ? 1 : 0,
-        x: k.text,
-        t: k.tags,
-      };
-    }),
-    replacer
-  );
-}
-
-/**
- * @param {import('@scriptin/jmdict-simplified-types').JMdictKanji[]} kanji
- */
-function stringifyKanji(kanji) {
-  return JSON.stringify(
-    kanji.map((k) => {
-      return {
-        c: k.common ? 1 : 0,
-        x: k.text,
-        t: k.tags,
-      };
-    }),
-    replacer
-  );
-}
-
-/**
  * @param {import('@scriptin/jmdict-simplified-types').JMdictSense[]} senses
  */
 function stringifySense(senses) {
   return JSON.stringify(
     senses.map((sense) => {
-      const { gloss, partOfSpeech, ...rest } = sense;
+      const { gloss, partOfSpeech, appliesToKana, appliesToKanji, ...rest } =
+        sense;
+
+      const appliesToAllKanji = appliesToKanji[0] === '*';
+      const appliesToAllKana = appliesToKana[0] === '*';
 
       return {
         ...rest,
         pos: partOfSpeech,
+        appliesToKanji: appliesToAllKanji ? undefined : appliesToKanji,
+        appliesToKana: appliesToAllKana ? undefined : appliesToKana,
         gloss: gloss.map((g) => g.text),
       };
     }),
