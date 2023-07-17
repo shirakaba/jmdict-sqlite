@@ -132,6 +132,7 @@ function download(input, output) {
  * @returns {Promise<void>}
  */
 async function populateDb(input, dbPath) {
+  /** @type {import('sqlite3').Database} */
   const db = await new Promise((resolve, reject) => {
     /** @type import('sqlite3').Database */
     const db = new sqlite3.Database(dbPath, (err) => {
@@ -143,34 +144,122 @@ async function populateDb(input, dbPath) {
     });
   });
 
-  console.log(db);
+  db.run(
+    'CREATE TABLE IF NOT EXISTS words (id INTEGER PRIMARY KEY, kanji TEXT, kana TEXT, sense TEXT);',
+    function onCompletion(error) {
+      if (error) {
+        console.log('SQLite error', error);
+      }
+    }
+  );
 
   let i = 0;
-  return new Promise((resolve) => {
-    const loader = loadDictionary('jmdict', input)
-      .onMetadata(() => {})
-      .onEntry((entry, metadata) => {
-        i++;
-        console.log('entry', entry);
-        // console.log('metadata entry', JSON.stringify(metadata));
 
-        if (i > 1) {
-          process.exit(1);
-        }
+  await /** @type {Promise<void>} */ (
+    new Promise((resolve) => {
+      const loader = loadDictionary('jmdict', input)
+        .onMetadata(() => {})
+        .onEntry((entry) => {
+          i++;
+          // console.log('entry', entry);
+          // console.log('metadata entry', JSON.stringify(metadata));
 
-        // Load an entry into database
-      })
-      .onEnd(() => {
-        console.log('Finished!');
-        resolve();
+          db.run(
+            'INSERT OR REPLACE INTO words ("id", "kanji", "kana", "sense") VALUES ($id, $kanji, $kana, $sense)',
+            {
+              $id: entry.id,
+              $kana: stringifyKana(entry.kana),
+              $kanji: stringifyKanji(entry.kanji),
+              $sense: stringifySense(entry.sense),
+            },
+            function onCompletion(error) {
+              if (error) {
+                console.log('SQLite error', error);
+              }
+            }
+          );
+
+          if (i > 1000) {
+            process.exit(1);
+          }
+        })
+        .onEnd(() => {
+          console.log('Finished!');
+          resolve();
+        });
+
+      // To handle parsing errors:
+      // @ts-ignore
+      loader.parser.on('error', (error) => {
+        console.error(error);
       });
+    })
+  );
 
-    // To handle parsing errors:
-    //@ts-ignore
-    loader.parser.on('error', (error) => {
-      console.error(error);
-    });
-  });
+  db.close();
 }
+
+/**
+ * @param {import('@scriptin/jmdict-simplified-types').JMdictKana[]} kana
+ */
+function stringifyKana(kana) {
+  return JSON.stringify(
+    kana.map((k) => {
+      return {
+        c: k.common ? 1 : 0,
+        x: k.text,
+        t: k.tags,
+      };
+    }),
+    replacer
+  );
+}
+
+/**
+ * @param {import('@scriptin/jmdict-simplified-types').JMdictKanji[]} kanji
+ */
+function stringifyKanji(kanji) {
+  return JSON.stringify(
+    kanji.map((k) => {
+      return {
+        c: k.common ? 1 : 0,
+        x: k.text,
+        t: k.tags,
+      };
+    }),
+    replacer
+  );
+}
+
+/**
+ * @param {import('@scriptin/jmdict-simplified-types').JMdictSense[]} senses
+ */
+function stringifySense(senses) {
+  return JSON.stringify(
+    senses.map((sense) => {
+      const { gloss, partOfSpeech, ...rest } = sense;
+
+      return {
+        ...rest,
+        pos: partOfSpeech,
+        gloss: gloss.map((g) => g.text),
+      };
+    }),
+    replacer
+  );
+}
+
+/**
+ * A replacer that omits any values that are empty arrays.
+ * @param {string} key
+ * @param {any} value
+ * @returns {any}
+ */
+const replacer = (key, value) => {
+  if (Array.isArray(value) && value.length === 0) {
+    return undefined; // Omit the key from the output
+  }
+  return value;
+};
 
 main().catch(console.error);
